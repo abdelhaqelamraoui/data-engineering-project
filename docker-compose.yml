@@ -78,7 +78,9 @@ services:
     networks: [trending-net]
 
   spark-processor:
-    build: ./services/spark-processor
+    build:
+      context: .
+      dockerfile: services/spark-processor/Dockerfile
     container_name: trending-spark-processor
     env_file: ./services/spark-processor/.env
     depends_on:
@@ -92,7 +94,9 @@ services:
     networks: [trending-net]
 
   api:
-    build: ./services/api
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
     container_name: trending-api
     env_file: ./services/api/.env
     depends_on:

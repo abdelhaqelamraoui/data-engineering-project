@@ -1,4 +1,4 @@
-ENGLISH_STOPWORDS = """
+_RAW_STOPWORDS = """
 a about above after again against all am an and any are aren't as at be
 because been before being below between both but by can't cannot could
 couldn't did didn't do does doesn't doing don't down during each few for
@@ -18,4 +18,4 @@ www com http https org net html
 
 # The cleaning pipeline deletes apostrophes outright (so "don't" -> "dont",
 # not "don" + "t"), so stopwords need both spellings.
-ENGLISH_STOPWORDS = list({*ENGLISH_STOPWORDS, *(w.replace("'", "") for w in ENGLISH_STOPWORDS)})
+ENGLISH_STOPWORDS = frozenset({*_RAW_STOPWORDS, *(w.replace("'", "") for w in _RAW_STOPWORDS)})

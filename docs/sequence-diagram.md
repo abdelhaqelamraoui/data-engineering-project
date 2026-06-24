@@ -1,8 +1,9 @@
 # Sequence diagram
 
 Who calls whom, in order, across one full ingest-to-display cycle. See
-[`architecture.md`](architecture.md) for the static topology and
-[`flowchart.md`](flowchart.md) for the decision logic inside each step.
+[`architecture.md`](architecture.md) for the static topology,
+[`flowchart.md`](flowchart.md) for the decision logic inside each step, and
+[`preprocessing.md`](preprocessing.md) for what `preprocess()` actually does.
 
 ```mermaid
 sequenceDiagram
@@ -59,7 +60,8 @@ sequenceDiagram
     A->>K: subscribe to bluesky-posts (own consumer group, latest offset)
     loop continuously
         K->>A: raw post message
-        A->>A: append to in-memory ring buffer
+        A->>A: preprocess(text) - same shared module S uses
+        A->>A: append {raw, cleaned_text, hashtags, words} to ring buffer
     end
 
     Note over U,A: Serving - "Live posts" page (polls every 2s)
@@ -69,6 +71,16 @@ sequenceDiagram
         U->>D: GET /api/posts/recent
         D->>A: GET /posts/recent
         A-->>D: JSON RecentPostsResponse (from buffer)
+        D-->>U: JSON RecentPostsResponse
+    end
+
+    Note over U,A: Serving - "Preprocessing" before/after page (polls every 2s)
+    U->>D: GET /preprocessing
+    D->>U: server-rendered page
+    loop every 2s while on page
+        U->>D: GET /api/posts/recent
+        D->>A: GET /posts/recent
+        A-->>D: JSON RecentPostsResponse (raw + cleaned_text + terms)
         D-->>U: JSON RecentPostsResponse
     end
 ```
@@ -88,3 +100,6 @@ sequenceDiagram
 - The live posts feed has its own always-on consume loop inside `api`,
   completely decoupled from the request/response cycle - a page poll just
   reads whatever is currently in the buffer, it never blocks on Kafka.
+- `/live` and `/preprocessing` poll the exact same endpoint and buffer -
+  they just render different fields of the same `PostItem`. There's no
+  separate "preprocessing" service or extra Kafka read for that page.

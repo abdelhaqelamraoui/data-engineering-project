@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 
 from aiokafka import AIOKafkaConsumer
 
+from preprocessing import preprocess
+
 logger = logging.getLogger("api.live_posts")
 
 
@@ -17,11 +19,17 @@ class LivePostsFeed:
     an independent consumer group starting from "latest" - it never commits
     offsets and is free to fall behind or restart without affecting (or
     being affected by) the trend-scoring pipeline.
+
+    Each buffered post is run through the same shared `preprocessing` module
+    spark-processor uses, so the buffer holds both the raw post (the "before")
+    and its cleaned text + extracted terms (the "after") for the dashboard's
+    before/after preview - computed once here rather than on every poll.
     """
 
-    def __init__(self, bootstrap_servers: str, topic: str, buffer_size: int):
+    def __init__(self, bootstrap_servers: str, topic: str, buffer_size: int, min_term_length: int):
         self._bootstrap_servers = bootstrap_servers
         self._topic = topic
+        self._min_term_length = min_term_length
         self._buffer: deque[dict] = deque(maxlen=buffer_size)
         self._task: asyncio.Task | None = None
         self._stopped = False
@@ -68,6 +76,10 @@ class LivePostsFeed:
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     continue
                 post["received_at"] = datetime.now(timezone.utc).isoformat()
+                result = preprocess(post.get("text", ""), self._min_term_length)
+                post["cleaned_text"] = result.cleaned_text
+                post["hashtags"] = result.hashtags
+                post["words"] = result.words
                 self._buffer.append(post)
         finally:
             await consumer.stop()

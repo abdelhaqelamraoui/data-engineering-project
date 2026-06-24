@@ -18,7 +18,10 @@ async def lifespan(app: FastAPI):
     app.state.config = _config
     app.state.hbase = HBaseRestClient(_config.hbase_rest_url)
     app.state.live_feed = LivePostsFeed(
-        _config.kafka_bootstrap_servers, _config.kafka_topic, _config.live_posts_buffer_size
+        _config.kafka_bootstrap_servers,
+        _config.kafka_topic,
+        _config.live_posts_buffer_size,
+        _config.min_term_length,
     )
     app.state.live_feed.start()
     yield

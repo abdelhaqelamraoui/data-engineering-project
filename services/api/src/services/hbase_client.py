@@ -1,7 +1,10 @@
 import base64
+import logging
 from urllib.parse import quote
 
 import httpx
+
+logger = logging.getLogger("api.hbase")
 
 
 def _b64(value: str) -> str:
@@ -37,7 +40,14 @@ class HBaseRestClient:
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
-        row = resp.json()["Row"][0]
+        data = resp.json()
+        if "Row" not in data:
+            # A row key that collides with one of the REST gateway's
+            # reserved sub-resources (e.g. literally "schema") lands here
+            # with a 200 but a totally different payload shape.
+            logger.warning("Unexpected response shape for %s (no 'Row' key) - treating as missing", url)
+            return None
+        row = data["Row"][0]
         return {_unb64(c["column"]): _unb64(c["$"]) for c in row["Cell"]}
 
     async def scan_range(self, table: str, start_row: str, end_row: str, limit: int = 1000) -> list[tuple[str, dict[str, str]]]:

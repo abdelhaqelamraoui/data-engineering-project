@@ -29,6 +29,10 @@ export interface PostItem {
   timestamp: string | null;
   lang: string | null;
   received_at: string;
+  // "after" preprocessing - see shared/preprocessing/
+  cleaned_text: string;
+  hashtags: string[];
+  words: string[];
 }
 
 export interface RecentPostsResponse {

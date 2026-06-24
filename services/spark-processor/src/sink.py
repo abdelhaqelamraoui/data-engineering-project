@@ -14,6 +14,15 @@ logger = logging.getLogger("spark_processor.sink")
 BUCKET_FORMAT = "%Y%m%d%H%M"
 
 
+def _baseline_row_key(term: str) -> str:
+    # HBase's REST gateway treats a handful of literal row segments as
+    # reserved sub-resources ("schema", "regions", "scanner", "multiget").
+    # A bare term as the row key collides with those whenever a real word
+    # matches one (e.g. someone posts about a database "schema") and 404s
+    # or - worse - 200s with the wrong payload. Prefixing sidesteps it.
+    return f"t#{term}"
+
+
 def ensure_tables(hbase: HBaseRestClient, config: Config) -> None:
     retention_seconds = config.retention_hours * 3600
     hbase.ensure_table(config.table_trends, {"trends": {"TTL": str(retention_seconds)}})
@@ -41,7 +50,7 @@ def _update_latest_bucket_pointer(hbase: HBaseRestClient, config: Config, bucket
 def _process_window(hbase: HBaseRestClient, config: Config, bucket: str, rows: list) -> None:
     candidates = []
     for row in rows:
-        baseline_row = hbase.get_row(config.table_baseline, row.term)
+        baseline_row = hbase.get_row(config.table_baseline, _baseline_row_key(row.term))
         baseline_avg = float(baseline_row["baseline:avg"]) if baseline_row else None
         score = compute_score(row.cnt, baseline_avg or 0.0, config.trend_smoothing)
         candidates.append((row.term, row.cnt, row.distinct_authors, score, baseline_avg))
@@ -68,7 +77,7 @@ def _process_window(hbase: HBaseRestClient, config: Config, bucket: str, rows: l
     # ranked highly enough to be displayed.
     for term, cnt, _distinct_authors, _score, baseline_avg in candidates:
         new_avg = update_baseline(baseline_avg, cnt, config.baseline_ema_alpha)
-        hbase.put_row(config.table_baseline, term, "baseline", {"avg": round(new_avg, 4)})
+        hbase.put_row(config.table_baseline, _baseline_row_key(term), "baseline", {"avg": round(new_avg, 4)})
 
     if top:
         _update_latest_bucket_pointer(hbase, config, bucket)

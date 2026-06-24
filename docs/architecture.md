@@ -2,13 +2,16 @@
 
 Static view of every service, the Docker network that connects them, and
 where each one persists state. See [`flowchart.md`](flowchart.md) for the
-step-by-step processing logic and [`sequence-diagram.md`](sequence-diagram.md)
-for the request/response timing between services.
+step-by-step processing logic, [`sequence-diagram.md`](sequence-diagram.md)
+for the request/response timing between services, and
+[`preprocessing.md`](preprocessing.md) for the shared cleaning module shown
+below as `PREP`.
 
 ```mermaid
 flowchart TB
     Jetstream(["Bluesky Jetstream<br/>wss firehose, public, no auth"])
     Browser(["Browser / User"])
+    PREP["shared/preprocessing/<br/>(repo root, pure Python)<br/>vendored into both images at build time"]
 
     subgraph NET["Docker network: trending-net"]
         direction TB
@@ -46,6 +49,9 @@ flowchart TB
     Browser -->|"HTTP :3000"| DASH
     DASH -.->|"server-side proxy<br/>/api/trending*, /api/posts/recent"| API
 
+    PREP -.->|"COPY at build time"| SPARK
+    PREP -.->|"COPY at build time"| API
+
     PROD -.-> VOLP
     KAFKA -.-> VOLK
     HBASE -.-> VOLH
@@ -68,5 +74,10 @@ flowchart TB
   need to ship inside the Spark image.
 - `api` reads `kafka` twice over: once as the source for `/trending`'s
   upstream data (indirectly, via what Spark writes to HBase) and once
-  directly, tailing the raw topic for the `/live` page's post feed. The two
-  consumers are independent - same topic, different consumer groups.
+  directly, tailing the raw topic for the `/live` and `/preprocessing`
+  pages' post feed. The two consumers are independent - same topic,
+  different consumer groups.
+- `PREP` is source code, not a running service - `spark-processor` and
+  `api` each get their own copy baked into their image at build time (see
+  [`preprocessing.md`](preprocessing.md)). They don't call each other or a
+  shared process for this; they just both started from the same file.

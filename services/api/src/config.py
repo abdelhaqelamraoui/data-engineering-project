@@ -19,6 +19,7 @@ class Config:
     kafka_bootstrap_servers: str
     kafka_topic: str
     live_posts_buffer_size: int
+    min_term_length: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -33,4 +34,7 @@ class Config:
             kafka_bootstrap_servers=os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"),
             kafka_topic=os.environ.get("KAFKA_TOPIC", "bluesky-posts"),
             live_posts_buffer_size=int(os.environ.get("LIVE_POSTS_BUFFER_SIZE", "200")),
+            # must match spark-processor's MIN_TERM_LENGTH for the preview to
+            # reflect what the scoring pipeline actually does
+            min_term_length=int(os.environ.get("MIN_TERM_LENGTH", "3")),
         )

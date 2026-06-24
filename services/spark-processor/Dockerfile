@@ -2,13 +2,13 @@ FROM apache/spark-py:v3.4.0
 
 USER root
 
-COPY requirements.txt /tmp/requirements.txt
+COPY services/spark-processor/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Pre-resolve the Spark<->Kafka connector jars at build time and copy the
 # ones missing from the base image onto the Spark classpath, so the running
 # container needs no network access to start the stream.
-COPY docker/warmup.py /tmp/warmup.py
+COPY services/spark-processor/docker/warmup.py /tmp/warmup.py
 RUN /opt/spark/bin/spark-submit \
       --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0 \
       --conf spark.jars.ivy=/tmp/.ivy2 \
@@ -22,7 +22,11 @@ RUN /opt/spark/bin/spark-submit \
 RUN mkdir -p /checkpoints && chmod -R 777 /checkpoints
 VOLUME ["/checkpoints"]
 
-COPY src/ /opt/spark/work-dir/src/
+COPY services/spark-processor/src/ /opt/spark/work-dir/src/
+# Shared cleaning/term-extraction rules, vendored in at build time - see
+# shared/preprocessing/ and docs/preprocessing.md. Edit that one module to
+# change scoring behavior; this Dockerfile never needs to change for it.
+COPY shared/preprocessing/ /opt/spark/work-dir/src/preprocessing/
 ENV HOME=/opt/spark/work-dir
 RUN chmod -R g+rwX /opt/spark/work-dir
 WORKDIR /opt/spark/work-dir/src

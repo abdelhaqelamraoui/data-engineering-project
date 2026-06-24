@@ -64,5 +64,12 @@ class HBaseRestClient:
             return None
         resp.raise_for_status()
         data = resp.json()
+        if "Row" not in data:
+            # Row keys that collide with one of the REST gateway's reserved
+            # sub-resources (e.g. literally "schema") land here with a 200
+            # but a completely different payload shape - treat as not-found
+            # rather than crashing the whole streaming query over one term.
+            logger.warning("Unexpected response shape for %s (no 'Row' key) - treating as missing", url)
+            return None
         row = data["Row"][0]
         return {_unb64(c["column"]): _unb64(c["$"]) for c in row["Cell"]}
