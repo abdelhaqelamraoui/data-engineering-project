@@ -17,6 +17,9 @@ sequenceDiagram
     participant H as hbase (REST :8080)
     participant A as api (FastAPI :8000)
     participant D as dashboard (Next.js :3000)
+    participant I as indexer
+    participant ES as elasticsearch (:9200)
+    participant KB as kibana (:5601)
     participant U as Browser
 
     Note over JS,P: Ingestion (continuous)
@@ -85,6 +88,25 @@ sequenceDiagram
         A-->>D: JSON RecentPostsResponse (raw + cleaned_text + terms)
         D-->>U: JSON RecentPostsResponse
     end
+
+    Note over K,ES: Indexing (independent of everything above - own consumer group, commits offsets)
+    I->>ES: HEAD bluesky-posts (create index with mapping if missing)
+    I->>KB: GET /api/data_views, then POST one if missing (best-effort, retried)
+    loop continuously
+        K->>I: raw post message
+        I->>I: preprocess(text) - same shared module S and A use
+        I->>I: append {raw, cleaned_text, hashtags, words} to buffer
+        alt buffer full or flush interval elapsed
+            I->>ES: PUT _bulk (upsert by post id)
+            I->>K: commit offsets
+        end
+    end
+
+    Note over U,KB: Exploration - Kibana Discover / visualizations (ad hoc, not polled by anything)
+    U->>KB: GET /app/discover
+    KB->>ES: search query (full text, filters, aggregations)
+    ES-->>KB: matching documents
+    KB-->>U: rendered results / histogram
 ```
 
 ## Reading this diagram
@@ -105,3 +127,14 @@ sequenceDiagram
 - `/live` and `/preprocessing` poll the exact same endpoint and buffer -
   they just render different fields of the same `PostItem`. There's no
   separate "preprocessing" service or extra Kafka read for that page.
+- The indexing block is a third, fully independent reader of `kafka` -
+  it doesn't wait for or block on `spark-processor` or `api`'s live feed,
+  and they don't wait on it either. Unlike `api`'s live-feed consumer, it
+  commits offsets, so a restart resumes instead of skipping data.
+- `I->>KB` (the data-view bootstrap) happens once at `indexer` startup and
+  is best-effort - if `kibana` isn't reachable yet it retries a bounded
+  number of times in the background and gives up quietly, it never blocks
+  or affects the indexing loop above it.
+- The Kibana exploration block has no polling loop and no fixed interval -
+  it only happens when a person opens Kibana, unlike every other "Serving"
+  block in this diagram.

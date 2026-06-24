@@ -25,6 +25,15 @@ endpoints → **dashboard** polls those endpoints and renders three views.
 Nothing in this chain talks to anything two steps away - each arrow below
 is one hop.
 
+Separately, and in parallel: **indexer** reads the same Kafka topic as a
+third independent consumer, cleans each post the same way, and bulk-writes
+it into **Elasticsearch**, which **Kibana** queries for full-text
+search/exploration. This branch never feeds back into the trending
+pipeline or the dashboard - it's an additive way to explore the raw
+firehose (search arbitrary text, facet on hashtags, see volume over time),
+not a replacement for HBase serving trends (which the project's original
+design brief explicitly chose over Elasticsearch/Kibana, and still does).
+
 ---
 
 ## Bluesky Jetstream *(external, not a container in this stack)*
@@ -334,6 +343,121 @@ http://localhost:16010 once running).
 
 ---
 
+## `indexer`
+
+**What it does:** a third, independent reader of the raw `bluesky-posts`
+topic - same source as `spark-processor` and `api`'s live feed, but for a
+different purpose: building a full-text searchable, ad-hoc-explorable
+archive of every post in Elasticsearch/Kibana. It exists *alongside* the
+HBase-based trending pipeline, not in place of it - the project's original
+design brief explicitly ruled out Elasticsearch/Kibana for *serving
+trends* (HBase still does that, unchanged), but search/exploration over
+the raw firehose is a genuinely different need that none of the other
+components cover: `dashboard` only shows a 200-post rolling window
+(`/live`, `/preprocessing`) and the trending API only returns ranked
+terms, neither lets you search arbitrary post text or facet on hashtags
+over an arbitrary time range.
+
+**Input:** Kafka topic `bluesky-posts`, via its own consumer group
+(`CONSUMER_GROUP_ID=indexer`, default `auto.offset.reset=latest` only for
+the very first run). Unlike `api`'s live-feed consumer, **this one commits
+offsets** - it's building a durable archive, so a restart should resume
+where it left off rather than skip data (api's live feed never commits,
+since it's deliberately a "right now" view, not an archive).
+
+**Processing:** for each post, run `preprocessing.preprocess(text)` (the
+same [shared module](preprocessing.md) `spark-processor` and `api` use)
+and buffer the result. Flushed to Elasticsearch via one `_bulk` request
+per `BULK_FLUSH_SIZE` documents or every `BULK_FLUSH_INTERVAL_SECONDS`,
+whichever comes first - not one index call per post. Kafka offsets are
+only committed *after* a flush succeeds; on an Elasticsearch hiccup the
+buffer and the Kafka position are both left alone and retried next loop,
+so a transient outage can't drop posts (re-indexing the same buffer later
+is a harmless upsert - see below).
+
+**Output → Elasticsearch index `bluesky-posts`** (`src/es_client.py`
+creates the index with an explicit mapping on first startup if it doesn't
+exist yet): `id, did, text, lang, timestamp, indexed_at, cleaned_text,
+hashtags, words`. Documents are upserted by post `id` (not an
+auto-generated `_id`), so an at-least-once redelivery after a restart
+overwrites instead of duplicating.
+
+**Also bootstraps a Kibana data view** on startup (`src/kibana_client.py`,
+title `bluesky-posts`, name "Bluesky Posts", time field `timestamp`) so
+the index is immediately browsable in Kibana's Discover app with no
+manual setup. This runs in a background thread with its own short retry
+loop (Kibana starts slower than Elasticsearch) and is purely best-effort -
+indexing itself never waits on or depends on Kibana being reachable.
+
+**Configuration:** `services/indexer/.env` - Kafka connection,
+`CONSUMER_GROUP_ID`, `ELASTICSEARCH_URL`, `ES_INDEX`, `KIBANA_URL`,
+`MIN_TERM_LENGTH` (should match `spark-processor`'s), `BULK_FLUSH_SIZE`,
+`BULK_FLUSH_INTERVAL_SECONDS`.
+
+**Tech:** Python, `confluent-kafka` (consumer), `elasticsearch` (official
+client, bulk helper), `requests` (for the small Kibana bootstrap call).
+
+**Code:** `services/indexer/src/` - `main.py` (consume/buffer/flush loop +
+signal handling), `es_client.py` (index mapping + bulk upsert),
+`kibana_client.py` (data view bootstrap), `config.py`. Vendors
+`shared/preprocessing/` at build time, same as `spark-processor` and
+`api` - see [`preprocessing.md`](preprocessing.md).
+
+**Depends on:** `kafka` (reader), `elasticsearch` (writer).
+**Depended on by:** `elasticsearch` (its only writer), `kibana`
+(indirectly - it just reads whatever `indexer` put in `elasticsearch`).
+
+---
+
+## `elasticsearch`
+
+**What it is:** a single-node Elasticsearch 8.15 cluster, security
+disabled (`xpack.security.enabled=false`) to match the rest of this
+stack's no-auth-needed posture - nothing else here has credentials
+either. Heap capped at 512MB (`ES_JAVA_OPTS=-Xms512m -Xmx512m`), generous
+enough for this project's data volume without competing too hard with
+Spark/Kafka/HBase for host memory.
+
+**Input:** writes from `indexer` only (`_bulk` requests).
+**Output:** reads from `kibana` (its queries) and from anyone hitting its
+REST API directly at `http://localhost:9200` for debugging.
+
+**Persistence:** `elasticsearch-data` volume, mounted at
+`/usr/share/elasticsearch/data`.
+
+**Configuration:** set directly in `docker-compose.yml`'s environment
+block (topology-level config, not secrets/tunables - same pattern as
+`kafka` and `hbase`). Host port via root `.env`'s `ELASTICSEARCH_PORT`
+(default `9200`).
+
+**Depends on:** nothing.
+**Depended on by:** `indexer` (writer), `kibana` (reader).
+
+---
+
+## `kibana`
+
+**What it is:** the web UI for exploring what's in `elasticsearch` -
+full-text search over raw post text, filtering/faceting on `lang`,
+`hashtags`, `words`, a time histogram of post volume, and a starting point
+for building custom visualizations/dashboards. This is purely an
+exploration tool layered on top of the indexing pipeline; nothing else in
+the stack depends on it or reads from it.
+
+**Input:** queries `elasticsearch` directly (`ELASTICSEARCH_HOSTS`).
+**Output:** serves the Kibana web UI to a browser at
+`http://localhost:5601`.
+
+**Configuration:** set directly in `docker-compose.yml`'s environment
+block, same pattern as `elasticsearch`. Host port via root `.env`'s
+`KIBANA_PORT` (default `5601`).
+
+**Depends on:** `elasticsearch` (must be healthy before Kibana starts -
+Kibana refuses to come up against an unreachable cluster).
+**Depended on by:** nothing (terminal node, like `dashboard`).
+
+---
+
 ## `api`
 
 **What it does:** the only HTTP-facing service besides the dashboard
@@ -468,6 +592,8 @@ everything else is container-to-container only:
 | `8000` | `api` | direct API access / debugging |
 | `8080` | `hbase` | REST gateway - direct HBase access / debugging |
 | `16010` | `hbase` | Master web UI |
+| `9200` | `elasticsearch` | REST API - direct query access / debugging |
+| `5601` | `kibana` | the Kibana web UI |
 
 `kafka` publishes no host port - nothing outside the docker network ever
 needs to reach it directly.
@@ -478,10 +604,11 @@ needs to reach it directly.
 |---|---|---|
 | `kafka-data` | `kafka:/var/lib/kafka/data` | topic log segments |
 | `hbase-data` | `hbase:/hbase-data` | all four tables' data + embedded Zookeeper state |
+| `elasticsearch-data` | `elasticsearch:/usr/share/elasticsearch/data` | the `bluesky-posts` index + Kibana's own saved objects (data views, dashboards) |
 | `producer-data` | `producer:/data` | the Jetstream resume cursor |
 | `spark-checkpoints` | `spark-processor:/checkpoints` | Kafka offsets + windowed-aggregation state |
 
-`docker compose down -v` removes all four (full reset). Removing just
+`docker compose down -v` removes all five (full reset). Removing just
 `spark-checkpoints` is the documented way to force `spark-processor` to
 restart its stream from scratch after an incompatible logic change.
 
@@ -500,13 +627,21 @@ each `.env` to exactly one container.
 `service_completed_successfully` enforces:
 
 ```
-kafka, hbase  (no dependencies, start first)
+kafka, hbase, elasticsearch  (no dependencies, start first)
   └─ kafka-init  (waits for kafka healthy, creates the topic, exits)
        ├─ producer  (waits for kafka-init to finish)
        └─ spark-processor  (waits for kafka-init + hbase healthy)
   └─ api  (waits for kafka + hbase healthy)
        └─ dashboard  (waits for api healthy)
+  └─ kibana  (waits for elasticsearch healthy)
+  └─ indexer  (waits for kafka-init + elasticsearch healthy)
 ```
+
+`indexer` does **not** wait on `kibana` - its core job (indexing into
+Elasticsearch) doesn't need Kibana, and Kibana is the slower-starting of
+the two. The data-view bootstrap it attempts on startup just retries in
+the background until Kibana comes up (or gives up after a bounded number
+of attempts and logs how to create it manually).
 
 ### Known operational characteristics
 

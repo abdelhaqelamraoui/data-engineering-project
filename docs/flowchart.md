@@ -24,6 +24,15 @@ flowchart TD
     LIVEPOLL --> LIVERENDER["/live: render post cards<br/>(hashtags highlighted)"]
     LIVEPOLL --> PREPRENDER["/preprocessing: render<br/>before/after cards"]
 
+    BUF --> IDXC["indexer's consumer<br/>(separate consumer group,<br/>commits offsets)"]
+    IDXC --> IDXPRE["run shared preprocessing.preprocess()<br/>on the raw text"]
+    IDXPRE --> IDXBUF["buffer in memory"]
+    IDXBUF --> IDXFLUSH{"buffer size >= BULK_FLUSH_SIZE<br/>OR time since last flush<br/>>= BULK_FLUSH_INTERVAL_SECONDS?"}
+    IDXFLUSH -->|No| IDXBUF
+    IDXFLUSH -->|Yes| IDXBULK["_bulk upsert into<br/>Elasticsearch index bluesky-posts"]
+    IDXBULK --> IDXCOMMIT["commit Kafka offsets"]
+    IDXBULK --> KIBANAVIEW["Kibana Discover / visualizations<br/>(full-text search, facets, histogram)"]
+
     BUF --> READ["spark-processor reads<br/>micro-batch from Kafka"]
     READ --> PARSE["parse JSON, drop nulls,<br/>parse timestamp"]
     PARSE --> CLEAN["shared preprocessing.preprocess()<br/>run as a Spark UDF:<br/>strip URLs, bare domains, mentions,<br/>apostrophes, punctuation"]
@@ -69,8 +78,14 @@ flowchart TD
   trend-scoring path - it never touches HBase or Spark. It feeds both the
   raw `/live` feed and the `/preprocessing` before/after view from the same
   buffer.
-- `CLEAN` and `LIVEPRE` call the exact same code (`shared/preprocessing/` -
-  see [`preprocessing.md`](preprocessing.md)), so what `/preprocessing`
-  shows is what the scoring pipeline actually does, not an approximation.
+- `CLEAN`, `LIVEPRE`, and `IDXPRE` all call the exact same code
+  (`shared/preprocessing/` - see [`preprocessing.md`](preprocessing.md)),
+  so what `/preprocessing` and Kibana both show is what the scoring
+  pipeline actually does, not an approximation.
+- The `IDXC` → `KIBANAVIEW` branch is the **indexer**: a third independent
+  reader of the same Kafka topic, feeding Elasticsearch/Kibana for
+  search/exploration. It's the only one of the three Kafka-reading
+  branches that commits offsets - it's building a durable archive, not a
+  "right now" snapshot, so a restart should resume rather than skip data.
 - The last block (`POLL` → `SPARKLINE`) is the **trending read path**: the
   dashboard never touches HBase directly, only the API does.
