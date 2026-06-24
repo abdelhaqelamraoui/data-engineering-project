@@ -1,9 +1,11 @@
 # Sequence diagram
 
 Who calls whom, in order, across one full ingest-to-display cycle. See
-[`architecture.md`](architecture.md) for the static topology,
-[`flowchart.md`](flowchart.md) for the decision logic inside each step, and
-[`preprocessing.md`](preprocessing.md) for what `preprocess()` actually does.
+[`components.md`](components.md) for what each participant below actually
+does in prose, [`architecture.md`](architecture.md) for the static
+topology, [`flowchart.md`](flowchart.md) for the decision logic inside
+each step, and [`preprocessing.md`](preprocessing.md) for what
+`preprocess()` actually does.
 
 ```mermaid
 sequenceDiagram

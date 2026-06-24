@@ -42,12 +42,21 @@ def build_query(spark: SparkSession, config: Config):
         .load()
     )
 
+    # `timestamp` is the post's self-reported `createdAt` from Bluesky - a
+    # client with a skewed clock (seen in practice, not hypothetical: a real
+    # post arrived claiming to be ~6.5 hours in the future) can set this to
+    # anything. Structured Streaming's watermark is the max event-time seen
+    # so far and never decreases, so a single far-future timestamp would
+    # otherwise jump it forward permanently and silently start dropping
+    # every normal, correctly-timed event as "too late" from then on.
+    future_cutoff = F.current_timestamp() + F.expr(f"INTERVAL {config.max_future_skew_seconds} SECONDS")
     posts = (
         raw.select(F.from_json(F.col("value").cast("string"), POST_SCHEMA).alias("post"))
         .select("post.*")
         .where(F.col("text").isNotNull() & F.col("did").isNotNull())
         .withColumn("timestamp", F.to_timestamp("timestamp"))
         .where(F.col("timestamp").isNotNull())
+        .where(F.col("timestamp") <= future_cutoff)
     )
 
     terms = extract_terms(posts, config)

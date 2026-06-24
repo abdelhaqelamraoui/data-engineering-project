@@ -19,6 +19,15 @@ def increment_numeric_string(value: str) -> str:
     return str(int(value) + 1).zfill(len(value))
 
 
+# HBase's REST "batch" scanner parameter caps *cells* per page, not rows -
+# a row with N columns can have its cells split across page boundaries.
+# This is deliberately independent of the caller's row `limit`, and large
+# enough that the bounded ranges this client ever scans (one bucket's
+# top-N rows, or one term's retention-window history) fit in very few
+# pages regardless of how many rows the caller actually wants back.
+_SCANNER_CELL_BATCH = 2000
+
+
 class HBaseRestClient:
     """Read-only HBase REST (Stargate) client used by the API layer.
 
@@ -53,7 +62,7 @@ class HBaseRestClient:
     async def scan_range(self, table: str, start_row: str, end_row: str, limit: int = 1000) -> list[tuple[str, dict[str, str]]]:
         create_resp = await self._client.put(
             f"{self._base_url}/{table}/scanner",
-            json={"startRow": _b64(start_row), "endRow": _b64(end_row), "batch": limit},
+            json={"startRow": _b64(start_row), "endRow": _b64(end_row), "batch": _SCANNER_CELL_BATCH},
             headers={"Content-Type": "application/json"},
         )
         if create_resp.status_code == 404:
@@ -61,7 +70,14 @@ class HBaseRestClient:
         create_resp.raise_for_status()
         scanner_url = create_resp.headers["Location"]
 
-        results: list[tuple[str, dict[str, str]]] = []
+        # Accumulate by row key and merge cells across pages - a row's
+        # cells can arrive split across multiple pages (see _SCANNER_CELL_BATCH),
+        # so a page's "Row" entry is not necessarily that row's full cell set
+        # yet. Rows arrive in key order, so it's safe to scan to completion
+        # (the 204) before truncating to `limit`, since these ranges are
+        # always small (one bucket's top-N, or one term's retention window).
+        rows: dict[str, dict[str, str]] = {}
+        order: list[str] = []
         try:
             while True:
                 resp = await self._client.get(scanner_url, headers={"Accept": "application/json"})
@@ -72,12 +88,12 @@ class HBaseRestClient:
                 for row in data.get("Row", []):
                     key = _unb64(row["key"])
                     cells = {_unb64(c["column"]): _unb64(c["$"]) for c in row["Cell"]}
-                    results.append((key, cells))
-                if len(results) >= limit:
-                    break
+                    if key not in rows:
+                        order.append(key)
+                    rows.setdefault(key, {}).update(cells)
         finally:
             await self._client.delete(scanner_url)
-        return results
+        return [(key, rows[key]) for key in order[:limit]]
 
     async def scan_bucket_prefix(self, table: str, bucket: str, limit: int = 1000) -> list[tuple[str, dict[str, str]]]:
         return await self.scan_range(table, bucket, increment_numeric_string(bucket), limit=limit)

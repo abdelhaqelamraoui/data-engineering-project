@@ -48,9 +48,15 @@ def _update_latest_bucket_pointer(hbase: HBaseRestClient, config: Config, bucket
 
 
 def _process_window(hbase: HBaseRestClient, config: Config, bucket: str, rows: list) -> None:
+    # One multiget for every candidate's baseline instead of one GET per
+    # candidate - see HBaseRestClient.get_rows for why this matters once a
+    # window has more than a couple hundred candidates.
+    baseline_keys = {row.term: _baseline_row_key(row.term) for row in rows}
+    baselines = hbase.get_rows(config.table_baseline, list(baseline_keys.values()))
+
     candidates = []
     for row in rows:
-        baseline_row = hbase.get_row(config.table_baseline, _baseline_row_key(row.term))
+        baseline_row = baselines.get(baseline_keys[row.term])
         baseline_avg = float(baseline_row["baseline:avg"]) if baseline_row else None
         score = compute_score(row.cnt, baseline_avg or 0.0, config.trend_smoothing)
         candidates.append((row.term, row.cnt, row.distinct_authors, score, baseline_avg))
@@ -58,26 +64,26 @@ def _process_window(hbase: HBaseRestClient, config: Config, bucket: str, rows: l
     candidates.sort(key=lambda c: c[3], reverse=True)
     top = candidates[: config.top_n]
 
+    trend_writes = []
+    history_writes = []
     for rank, (term, cnt, distinct_authors, score, baseline_avg) in enumerate(top, start=1):
-        hbase.put_row(
-            config.table_trends,
+        trend_writes.append((
             f"{bucket}#{rank:03d}",
             "trends",
             {"rank": rank, "term": term, "count": cnt, "score": round(score, 4), "distinct_authors": distinct_authors},
-        )
-        hbase.put_row(
-            config.table_term_history,
-            f"{term}#{bucket}",
-            "history",
-            {"count": cnt, "score": round(score, 4)},
-        )
+        ))
+        history_writes.append((f"{term}#{bucket}", "history", {"count": cnt, "score": round(score, 4)}))
+    hbase.put_rows(config.table_trends, trend_writes)
+    hbase.put_rows(config.table_term_history, history_writes)
 
     # Baseline is updated from every qualifying candidate (not just the top
     # N) so a term's trailing average keeps tracking it even while it isn't
     # ranked highly enough to be displayed.
-    for term, cnt, _distinct_authors, _score, baseline_avg in candidates:
-        new_avg = update_baseline(baseline_avg, cnt, config.baseline_ema_alpha)
-        hbase.put_row(config.table_baseline, _baseline_row_key(term), "baseline", {"avg": round(new_avg, 4)})
+    baseline_writes = [
+        (_baseline_row_key(term), "baseline", {"avg": round(update_baseline(baseline_avg, cnt, config.baseline_ema_alpha), 4)})
+        for term, cnt, _distinct_authors, _score, baseline_avg in candidates
+    ]
+    hbase.put_rows(config.table_baseline, baseline_writes)
 
     if top:
         _update_latest_bucket_pointer(hbase, config, bucket)

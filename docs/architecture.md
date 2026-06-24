@@ -1,9 +1,11 @@
 # System architecture
 
 Static view of every service, the Docker network that connects them, and
-where each one persists state. See [`flowchart.md`](flowchart.md) for the
-step-by-step processing logic, [`sequence-diagram.md`](sequence-diagram.md)
-for the request/response timing between services, and
+where each one persists state. See [`components.md`](components.md) for
+the prose write-up of each box below (what it does, exact input/output,
+configuration), [`flowchart.md`](flowchart.md) for the step-by-step
+processing logic, [`sequence-diagram.md`](sequence-diagram.md) for the
+request/response timing between services, and
 [`preprocessing.md`](preprocessing.md) for the shared cleaning module shown
 below as `PREP`.
 

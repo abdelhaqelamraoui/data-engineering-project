@@ -11,6 +11,7 @@ class Config:
     window_duration: str
     slide_duration: str
     watermark_delay: str
+    max_future_skew_seconds: int
 
     min_count_threshold: int
     min_distinct_authors: int
@@ -36,6 +37,7 @@ class Config:
             window_duration=os.environ.get("WINDOW_DURATION", "5 minutes"),
             slide_duration=os.environ.get("SLIDE_DURATION", "1 minute"),
             watermark_delay=os.environ.get("WATERMARK_DELAY", "2 minutes"),
+            max_future_skew_seconds=int(os.environ.get("MAX_FUTURE_SKEW_SECONDS", "120")),
             min_count_threshold=int(os.environ.get("MIN_COUNT_THRESHOLD", "3")),
             min_distinct_authors=int(os.environ.get("MIN_DISTINCT_AUTHORS", "2")),
             trend_smoothing=float(os.environ.get("TREND_SMOOTHING", "1.0")),

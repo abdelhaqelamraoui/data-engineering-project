@@ -7,6 +7,9 @@ minimum word length. Both `spark-processor` (the real scoring pipeline) and
 this module - edit it once, both consumers pick up the change on their next
 rebuild. Nothing else in either service needs to change.
 
+See [`components.md`](components.md) for how this fits into the rest of
+the system end to end.
+
 ```
 shared/preprocessing/
   __init__.py          # public API: preprocess(), PreprocessResult, ENGLISH_STOPWORDS

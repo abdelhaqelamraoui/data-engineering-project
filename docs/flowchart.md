@@ -1,10 +1,11 @@
 # Application flowchart
 
 Step-by-step logic from a single Jetstream event to it appearing (or not)
-on the dashboard. See [`architecture.md`](architecture.md) for which
-service owns each stage, [`sequence-diagram.md`](sequence-diagram.md) for
-the timing between services, and [`preprocessing.md`](preprocessing.md) for
-the cleaning/tokenizing rules themselves.
+on the dashboard. See [`components.md`](components.md) for what each box
+below actually does in prose, [`architecture.md`](architecture.md) for
+which service owns each stage, [`sequence-diagram.md`](sequence-diagram.md)
+for the timing between services, and [`preprocessing.md`](preprocessing.md)
+for the cleaning/tokenizing rules themselves.
 
 ```mermaid
 flowchart TD

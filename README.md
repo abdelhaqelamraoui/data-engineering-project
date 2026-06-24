@@ -28,8 +28,12 @@ Each box is its own container, its own Dockerfile, and its own `.env` file -
 see [Services](#services) below. Everything is wired together by the root
 [`docker-compose.yml`](docker-compose.yml).
 
-For diagrams (system architecture, step-by-step flowchart, and a
-service-to-service sequence diagram), see [`docs/`](docs/architecture.md).
+**For the full picture, read [`docs/components.md`](docs/components.md)** -
+a component-by-component reference covering what each piece does, exactly
+where its input comes from, exactly where its output goes, and how it's
+configured. The diagrams (system architecture, step-by-step flowchart, and
+a service-to-service sequence diagram) are in the same [`docs/`](docs/architecture.md)
+folder.
 
 ## Decisions made (resolving the brief's open questions)
 
@@ -125,7 +129,7 @@ appropriate for this single-node deployment.
 ```
 docker-compose.yml          # wires every service together
 .env.example                 # shared ports / Kafka cluster id
-docs/                        # architecture, flowchart, sequence, preprocessing docs
+docs/                        # components reference, architecture/flowchart/sequence diagrams, preprocessing
 infra/
   kafka/Dockerfile           # apache/kafka + writable data dir for the named volume
   hbase/Dockerfile           # bde2020/hbase-standalone + REST gateway startup script
