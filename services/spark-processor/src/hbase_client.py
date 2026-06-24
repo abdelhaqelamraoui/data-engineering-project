@@ -23,7 +23,7 @@ class HBaseRestClient:
     so plain REST calls are fast enough here.
     """
 
-    def __init__(self, base_url: str, timeout: float = 10.0):
+    def __init__(self, base_url: str, timeout: float = 20.0):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._session = requests.Session()
