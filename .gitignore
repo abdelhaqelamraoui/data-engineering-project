@@ -1,0 +1,25 @@
+# Env files (real secrets/config, never commit)
+.env
+**/.env
+**/.env.local
+!**/.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Docker volumes mounted locally (checkpoints, logs)
+data/
+**/checkpoints/
+*.log
+
+# IDE
+.vscode/
+.idea/

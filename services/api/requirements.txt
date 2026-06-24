@@ -1,0 +1,7 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+httpx==0.27.0
+aiokafka==0.11.0
+# aiokafka's codec module uses cramjam (not the standalone lz4 package) to
+# decompress lz4/snappy/zstd-compressed messages, e.g. the producer's lz4 topic.
+cramjam==2.8.3
