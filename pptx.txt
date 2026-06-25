@@ -1,0 +1,25 @@
+Create a pptx presentation for this whole project.
+
+
+- Use these colors for the whole presenation : #F3C816, #000000, #231F20, #0AF0F4, #02988D
+- Add page number for amm slides
+
+1. Page de garde with placeholder for the university logo, title, two authers, date, module name
+2. Plan wil the bix axes of the prentation
+3. Introduction as a grounding for the problem we solved
+...
+
+x. conclusion
+y. slide to present the project implementation
+y. thank you slide
+
+
+- Use diagrams in the presentation and logos of technologies if needed.
+- keep text clean and not too much small
+- Make sure nothing overflows 
+- Keep things consice
+- Make sure to present the problematic to resolve
+- Make sure to use diagrams to explan the architecture.
+- Make sure the presenation is pptx compatible and use the Silde Master feature
+- Make sure to enlight on the pipeline and the cleaning process in realtime
+- Male sure the presenation is professional and clean and do not have lots of dark backgrounds. 
